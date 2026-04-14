@@ -1,0 +1,532 @@
+---
+title: "Chronic Absenteeism and ELA Proficiency in New York State"
+format:
+  dashboard:
+    orientation: rows
+    theme:
+      light: [cosmo, theme.scss]
+      dark: [darkly, theme.scss]
+    respect-user-color-scheme: true
+    include-in-header:
+      - external-links.html
+      - plotly-theme.html
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+#| tags: [parameters]
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from pathlib import Path
+
+# Quarto defaults IPython to displaying every expression statement, which
+# causes each fig.update_layout / fig.add_scatter call to render an extra
+# copy of the figure. Restore the normal Jupyter default.
+from IPython.core.interactiveshell import InteractiveShell
+InteractiveShell.ast_node_interactivity = "last_expr"
+
+DATA_DIR = Path("data/processed")
+district_df = pd.read_parquet(DATA_DIR / "district_year.parquet")
+statewide_df = pd.read_parquet(DATA_DIR / "statewide_year.parquet")
+subgroup_df = pd.read_parquet(DATA_DIR / "subgroup_year.parquet")
+
+LATEST_YEAR = int(district_df["year"].max())
+PRIOR_YEAR = LATEST_YEAR - 1
+
+NRC_ORDER = [
+    "New York City",
+    "Large City Districts",
+    "High Need Urban-Suburban",
+    "High Need Rural",
+    "Average Need",
+    "Low Need",
+]
+# Okabe-Ito colorblind-safe qualitative palette
+NRC_COLORS = {
+    "New York City":             "#0072B2",  # blue
+    "Large City Districts":      "#E69F00",  # orange
+    "High Need Urban-Suburban":  "#009E73",  # bluish green
+    "High Need Rural":           "#D55E00",  # vermillion
+    "Average Need":              "#CC79A7",  # reddish purple
+    "Low Need":                  "#56B4E9",  # sky blue
+}
+TRENDS_ABSENT_COLOR = "#D55E00"  # vermillion
+TRENDS_ELA_COLOR    = "#0072B2"  # blue
+
+def nrc_color_key():
+    from IPython.display import HTML
+    rows = "<br>".join(
+        f'<span class="nrc-key-item" data-nrc="{name}" role="button" tabindex="0" '
+        f'style="cursor:pointer;user-select:none;">'
+        f'<span style="color:{color};font-size:1.4em;vertical-align:-2px;">&#9679;</span>'
+        f'&nbsp;{name}</span>'
+        for name, color in NRC_COLORS.items()
+    )
+    script = """
+<script>
+(function() {
+  function matches(trace, target) {
+    return (trace.legendgroup || trace.name) === target;
+  }
+  function findPlotForTarget(tab, target) {
+    var plots = tab.querySelectorAll('.plotly-graph-div');
+    for (var i = 0; i < plots.length; i++) {
+      var p = plots[i];
+      if (p.data && p.data.some(function(t) { return matches(t, target); })) return p;
+    }
+    return null;
+  }
+  function wire() {
+    document.querySelectorAll('.nrc-key-item').forEach(function(el) {
+      if (el.dataset.nrcWired) return;
+      el.dataset.nrcWired = '1';
+      var handler = function() {
+        var tab = el.closest('.dashboard-page');
+        if (!tab) return;
+        var target = el.dataset.nrc;
+        var plot = findPlotForTarget(tab, target);
+        if (!plot) return;
+        var anyVisible = plot.data.some(function(t) {
+          return matches(t, target) && t.visible !== 'legendonly' && t.visible !== false;
+        });
+        var newVis = anyVisible ? 'legendonly' : true;
+        var indices = [];
+        var update = [];
+        plot.data.forEach(function(t, i) {
+          if (matches(t, target)) { indices.push(i); update.push(newVis); }
+        });
+        if (indices.length) Plotly.restyle(plot, {visible: update}, indices);
+        el.style.opacity = (newVis === 'legendonly') ? '0.4' : '1';
+      };
+      el.addEventListener('click', handler);
+      el.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); }
+      });
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wire);
+  } else { wire(); }
+  setTimeout(wire, 300);
+  setTimeout(wire, 1500);
+})();
+</script>
+"""
+    return HTML(
+        '<p style="margin-top:1em;padding-top:0.75em;'
+        'border-top:1px solid rgba(128,128,128,0.3);font-size:0.9em;line-height:1.8;">'
+        '<strong>Peer Group (N/RC)</strong><br>'
+        f'{rows}</p>{script}'
+    )
+```
+
+# Overview
+
+## Row
+
+### Column {width=50%}
+
+```{python}
+#| component: valuebox
+#| title: "Statewide Chronic Absenteeism"
+latest_state = statewide_df.query("year == @LATEST_YEAR").iloc[0]
+dict(
+    icon="person-x",
+    color="warning",
+    value=f"{latest_state['absent_rate']:.1f}%",
+)
+```
+
+```{python}
+#| component: valuebox
+#| title: "Statewide ELA Proficiency (Grades 3-8)"
+dict(
+    icon="book",
+    color="info",
+    value=f"{latest_state['ela_prof_rate']:.1f}%",
+)
+```
+
+```{python}
+#| component: valuebox
+#| title: "YoY Change in Chronic Absenteeism"
+prior_state = statewide_df.query("year == @PRIOR_YEAR").iloc[0]
+delta = latest_state["absent_rate"] - prior_state["absent_rate"]
+if abs(delta) < 0.5:
+    color, icon = "secondary", "dash"
+elif delta > 0:
+    color, icon = "warning", "arrow-up"
+else:
+    color, icon = "primary", "arrow-down"
+dict(
+    icon=icon,
+    color=color,
+    value=f"{delta:+.1f} pp",
+)
+```
+
+### Column {width=50%}
+
+::: {.card title="How to Read This Dashboard"}
+
+This dashboard shows two things side by side for every public school district in New York State: the chronic absenteeism rate and the Grade 3-8 ELA proficiency rate. The data comes from the New York State Education Department's public School Report Card database.
+
+**The single most important thing to know before you start clicking:** districts are not comparable across peer groups. A high-need rural district and a low-need suburban district are not playing the same game, and plotting them against each other without context produces a misleading story. Every chart in this dashboard is grouped, colored, or filtered by NYSED's Need-to-Resource Capacity category, which is the state's own peer-grouping index built from estimated poverty and combined district wealth.
+
+Use the tabs above to move between the statewide scatter plot, trend lines over time, and the full district explorer.
+:::
+
+::: {.card title="Peer Group Snapshot (2023–24 School Year)"}
+
+```{python}
+latest = district_df.query("year == @LATEST_YEAR and subgroup == 'All Students'")
+summary = (
+    latest.groupby("nrc_category", observed=True)
+    .agg(
+        districts=("entity_cd", "count"),
+        absent_rate=("absent_rate", "median"),
+        ela_prof_rate=("ela_prof_rate", "median"),
+    )
+    .reindex(NRC_ORDER)
+    .reset_index()
+    .rename(columns={
+        "nrc_category": "Peer Group",
+        "districts": "# Districts",
+        "absent_rate": "Median Absenteeism",
+        "ela_prof_rate": "Median ELA Proficiency",
+    })
+)
+summary["Median Absenteeism"] = summary["Median Absenteeism"].map(lambda v: f"{v:.1f}%")
+summary["Median ELA Proficiency"] = summary["Median ELA Proficiency"].map(lambda v: f"{v:.1f}%")
+summary
+```
+:::
+
+# The Correlation
+
+## Row
+
+### Column {width=75%}
+
+```{python}
+#| title: "Chronic Absenteeism vs ELA Proficiency, by Peer Group"
+latest_all = district_df.query("year == @LATEST_YEAR and subgroup == 'All Students'")
+fig = px.scatter(
+    latest_all,
+    x="absent_rate",
+    y="ela_prof_rate",
+    color="nrc_category",
+    color_discrete_map=NRC_COLORS,
+    category_orders={"nrc_category": NRC_ORDER},
+    hover_data=["district_name", "k12_enrollment"],
+    trendline="ols",
+    trendline_scope="trace",
+    labels={
+        "absent_rate": "Chronic Absenteeism Rate (%)",
+        "ela_prof_rate": "ELA 3-8 Proficiency Rate (%)",
+        "nrc_category": "Peer Group (N/RC)",
+    },
+)
+fig.update_layout(
+    template="plotly_white",
+    legend=dict(
+        title_text="",
+        orientation="h",
+        yanchor="bottom", y=0.01,
+        yref="container",
+        xanchor="center", x=0.5,
+        xref="paper",
+        font=dict(size=12),
+        entrywidth=300,
+        entrywidthmode="pixels",
+    ),
+    autosize=True,
+    width=None,
+    height=None,
+    margin=dict(l=50, r=20, t=30, b=140),
+)
+fig
+```
+
+### Column {width=25%}
+
+::: {.card title="Reading the Scatter Plot"}
+
+Each dot is one public school district in the latest reporting year. The color tells you which NYSED peer group the district belongs to. Trend lines are drawn per peer group, not across the entire state, because the slope of the relationship is itself different across peer groups. If you looked at a single statewide trend line you would conclude, incorrectly, that the correlation is the same everywhere. It is not.
+
+The hover tooltip shows district name and enrollment so you can judge how much weight to give any single dot — a very small district may sit far from its peer group's trend for reasons that have nothing to do with instructional quality.
+:::
+
+# Trends Over Time
+
+## Row
+
+### Column {width=75%}
+
+```{python}
+#| title: "Statewide Absenteeism and ELA Proficiency Over Time"
+fig = go.Figure()
+fig.add_scatter(
+    x=statewide_df["year"],
+    y=statewide_df["absent_rate"],
+    name="Chronic Absenteeism",
+    line=dict(color=TRENDS_ABSENT_COLOR, width=3),
+)
+fig.add_scatter(
+    x=statewide_df["year"],
+    y=statewide_df["ela_prof_rate"],
+    name="ELA 3-8 Proficiency",
+    line=dict(color=TRENDS_ELA_COLOR, width=3),
+    yaxis="y2",
+)
+fig.add_vrect(
+    x0=2019.5, x1=2020.5,
+    fillcolor="rgba(128,128,128,0.25)",
+    line_width=0,
+    annotation_text="2020<br>assessments<br>cancelled",
+    annotation_position="inside",
+    annotation_font=dict(size=10, color="#888"),
+)
+fig.update_layout(
+    template="plotly_white",
+    xaxis=dict(
+        title="School Year (reporting year)",
+        tickmode="linear",
+        dtick=1,
+        tickformat="d",
+    ),
+    yaxis=dict(
+        title="Chronic Absenteeism (%)",
+        side="left",
+        title_font=dict(color=TRENDS_ABSENT_COLOR),
+        tickfont=dict(color=TRENDS_ABSENT_COLOR),
+        gridcolor="rgba(213, 94, 0, 0.3)",
+    ),
+    yaxis2=dict(
+        title="ELA Proficiency (%)",
+        side="right",
+        overlaying="y",
+        title_font=dict(color=TRENDS_ELA_COLOR),
+        tickfont=dict(color=TRENDS_ELA_COLOR),
+        gridcolor="rgba(0, 114, 178, 0.3)",
+    ),
+    legend=dict(
+        orientation="h",
+        yanchor="bottom", y=0.01,
+        yref="container",
+        xanchor="center", x=0.5,
+        xref="paper",
+        font=dict(size=12),
+        entrywidth=180,
+        entrywidthmode="pixels",
+    ),
+    autosize=True,
+    width=None,
+    height=None,
+    margin=dict(l=70, r=70, t=40, b=120),
+)
+fig
+```
+
+### Column {width=25%}
+
+::: {.card title="Reading the Statewide Trend"}
+
+This chart overlays two statewide rates on the same time axis using two y-axes: chronic absenteeism on the left, ELA 3-8 proficiency on the right. A dual-axis chart is the right call here only because both series are already percentages and share a comparable scale — it is not appropriate for comparing quantities in different units.
+
+The 2020 annotation marks the school year when New York cancelled spring state assessments in response to the pandemic. ELA proficiency rates for that year are missing from the series; absenteeism was reported but should be interpreted in light of widespread remote learning, where the operational definition of "attendance" varied by district.
+
+The post-2020 divergence — absenteeism spiking while proficiency dropped — is the headline finding that motivates the rest of this dashboard.
+:::
+
+## Row
+
+### Column {width=75%}
+
+```{python}
+#| title: "Chronic Absenteeism by Peer Group"
+by_group = (
+    district_df.query("subgroup == 'All Students'")
+    .groupby(["year", "nrc_category"], observed=True)["absent_rate"]
+    .median()
+    .reset_index()
+)
+fig = px.line(
+    by_group,
+    x="year",
+    y="absent_rate",
+    color="nrc_category",
+    color_discrete_map=NRC_COLORS,
+    category_orders={"nrc_category": NRC_ORDER},
+    markers=True,
+    labels={
+        "year": "School Year",
+        "absent_rate": "Median Chronic Absenteeism (%)",
+        "nrc_category": "Peer Group (N/RC)",
+    },
+)
+fig.update_layout(
+    template="plotly_white",
+    xaxis=dict(tickmode="linear", dtick=1, tickformat="d"),
+    legend=dict(
+        title_text="",
+        orientation="h",
+        yanchor="bottom", y=0.01,
+        yref="container",
+        xanchor="center", x=0.5,
+        xref="paper",
+        font=dict(size=12),
+        entrywidth=300,
+        entrywidthmode="pixels",
+    ),
+    autosize=True,
+    width=None,
+    height=None,
+    margin=dict(l=60, r=20, t=30, b=140),
+)
+fig
+```
+
+### Column {width=25%}
+
+::: {.card title="Reading the Peer Group Trend"}
+
+This chart breaks the statewide absenteeism trend apart by NYSED Need-to-Resource Capacity category, using the median district within each peer group as the representative value. The takeaway is not any individual line, but the gap between them: the post-2020 jump in chronic absenteeism is much larger in high-need districts than in low-need ones, even though every peer group rose.
+
+Reading this chart as a comparative story — whose absenteeism got worse faster — is more honest than reading the statewide aggregate, because the statewide line blends very different underlying realities into a single number.
+:::
+
+# District Explorer
+
+## Row
+
+### Column {width=75%}
+
+```{python}
+#| title: "All Districts (2023–24 School Year)"
+from itables import show
+explorer = (
+    district_df.query("year == @LATEST_YEAR and subgroup == 'All Students'")
+    [["district_name", "county_name", "nrc_category",
+      "k12_enrollment", "combined_absent_rate",
+      "em_ela_prof_rate", "hs_ela_prof_rate"]]
+    .rename(columns={
+        "district_name": "District",
+        "county_name": "County",
+        "nrc_category": "Peer Group",
+        "k12_enrollment": "K–12 Enrollment",
+        "combined_absent_rate": "Absenteeism %",
+        "em_ela_prof_rate": "EM ELA % (3–8)",
+        "hs_ela_prof_rate": "HS ELA % (Regents)",
+    })
+    .sort_values("District")
+)
+import re
+def smart_title(s):
+    s = s.title()
+    # Restore district-type abbreviations to uppercase
+    s = re.sub(r'\bUfsd\b', 'UFSD', s)
+    s = re.sub(r'\bCsd\b', 'CSD', s)
+    s = re.sub(r'\b(?<!\w)Sd\b', 'SD', s)
+    s = re.sub(r'\bCs\b', 'CS', s)
+    s = re.sub(r'\bHs\b', 'HS', s)
+    s = re.sub(r'\bNyc\b', 'NYC', s)
+    return s
+explorer["District"] = explorer["District"].apply(smart_title)
+explorer["County"] = explorer["County"].str.title()
+explorer["K–12 Enrollment"] = explorer["K–12 Enrollment"].apply(
+    lambda v: f"{int(v):,}" if pd.notna(v) else "Suppressed"
+)
+explorer["Absenteeism %"] = explorer["Absenteeism %"].apply(
+    lambda v: f"{round(v)}" if pd.notna(v) else "Suppressed"
+)
+explorer["EM ELA % (3–8)"] = explorer["EM ELA % (3–8)"].apply(
+    lambda v: f"{round(v)}" if pd.notna(v) else "Suppressed"
+)
+explorer["HS ELA % (Regents)"] = explorer["HS ELA % (Regents)"].apply(
+    lambda v: f"{round(v)}" if pd.notna(v) else "Suppressed"
+)
+show(explorer, paging=True, searching=True, ordering=True, pageLength=19, lengthMenu=[19, 50, 100],
+     showIndex=False, columnDefs=[{"className": "dt-right", "targets": [3, 4, 5, 6]}])
+```
+
+### Column {width=25%}
+
+::: {.card title="Using the Explorer"}
+
+Sort, search, and filter across all ~700 New York State public school districts. The Peer Group column is fixed in the default view so that any ranking you do is contextualized against districts that face comparable resource constraints. Suppressed values (subgroups with fewer than five students) are excluded.
+:::
+
+# Methodology {scrolling="true"}
+
+::: {.card}
+
+### Data Sources
+
+All data comes from the **New York State Education Department** public downloads at [data.nysed.gov/downloads.php](https://data.nysed.gov/downloads.php). Five tables were extracted from the SRC (ESSA accountability) Microsoft Access database, plus one table from the separate Enrollment Database:
+
+- **`Annual EM ELA`** — Grade 3–8 English Language Arts proficiency, by district and subgroup
+- **`Annual Regents Exams`** — Regents exam results; filtered to Common Core English (the HS ELA analogue)
+- **`ACC EM Chronic Absenteeism`** — Chronic absenteeism for Grades 1–8
+- **`ACC HS Chronic Absenteeism`** — Chronic absenteeism for Grades 9–12
+- **`BOCES and N/RC`** — District classification lookup including Need-to-Resource Capacity category
+- **`BEDS Day Enrollment`** (Enrollment Database) — True K–12 enrollment totals, used as the denominator column throughout the District Explorer
+
+Each release contains two school years of data. Earlier years were stitched together from multiple releases (SRC2019, SRC2022, SRC2024 plus their matching Enrollment releases) to form the time series on the Trends page.
+
+### How we measure ELA proficiency
+
+For Grade 3–8 ELA, this dashboard computes proficiency as **`NUM_PROF / TOTAL_COUNT`** rather than NYSED's published `PER_PROF` (which equals `NUM_PROF / NUM_TESTED`). The difference is the treatment of students who did not take the test: our denominator includes them, NYSED's does not.
+
+This is the more conservative choice. Several New York districts — particularly in the Hudson Valley and on Long Island — have historical opt-out rates above 50%. Under `PER_PROF`, a district where only the most academically secure half of students sat for the exam can appear dramatically more proficient than its peers. Using `TOTAL_COUNT` as the denominator treats non-testers as non-proficient, which matches NYSED's "Weighted Average Achievement" methodology in spirit.
+
+As a result, **proficiency rates in this dashboard will not match what you see on data.nysed.gov**. This is intentional and the gap is largest in low-participation years (notably 2021, post-COVID) and in high-opt-out districts.
+
+The EM 3–8 series and the Regents HS series are displayed separately because they measure different things: different grade-level standards, different test designs, and a different cohort (Regents is essentially 11th-grade test-takers, not the full grade level). **EM 3–8 is the headline metric** on every page except the District Explorer, both because it has the longest time series and because — unlike the Regents table — it has a `TOTAL_COUNT` column. The Regents table provides only `TESTED`, so the HS ELA column in the District Explorer necessarily falls back to `PER_PROF` and is **not** opt-out adjusted. Compare HS ELA across districts with this asymmetry in mind.
+
+### How we measure chronic absenteeism
+
+NYSED defines a chronically absent student as one who is absent for **10% or more of enrolled instructional days**. All absences count — excused, unexcused, and out-of-school suspensions. The denominator is students who were enrolled for at least 10 instructional days and present for at least one of those days; students who never attended are excluded. In districts with high student mobility, that exclusion matters.
+
+The Grades 1–8 figure (`ACC EM Chronic Absenteeism`) and the Grades 9–12 figure (`ACC HS Chronic Absenteeism`) are published as separate tables. This dashboard combines them into a single K–12 rate using **count-based math**, not rate averaging:
+
+&nbsp;&nbsp;&nbsp;&nbsp;`combined_rate = (em_absent_count + hs_absent_count) / (em_enrollment + hs_enrollment)`
+
+Summing counts rather than averaging rates means the combined figure is correctly weighted by the number of students in each band, and it degrades gracefully when only one side is available (for example, K–8 districts with no high school).
+
+An earlier version of this dashboard reported the Grades 1–8 figure only. That matched NYSED's ESSA federal indicator scope but produced enrollment numbers in the District Explorer that were systematically 30–40% lower than the district totals published on data.nysed.gov — a confusing discrepancy for anyone cross-checking. The switch to K–12 resolves that.
+
+### The K–2 literacy gap
+
+New York has no statewide assessment of K–2 literacy. Education Law §818 requires every district to attest that it has adopted a literacy curriculum aligned to the "science of reading," but there is no central data collection on actual outcomes in those grades. This is a limitation of the dataset, not a choice — the earliest grade-level reading proficiency we can observe is Grade 3, and any analysis purporting to measure "early literacy" from this data is by definition measuring the tail end of it.
+
+### Suppression and Data Quality
+
+NYSED suppresses assessment values when the tested group has **fewer than five students** (the small-N rule). Suppressed cells appear as `"s"` in the source database and are coerced to missing in the cleaning pipeline.
+
+The small-N rule is a privacy threshold, not the accountability threshold. **Accountability determinations** under the NY ESSA plan use a stricter n-size: 30 students for performance calculations and 40 for participation. This dashboard is descriptive, not an accountability scorecard, so it reports every cell that survives small-N suppression. Readers should be careful not to read a single-year district value here as a formal accountability result.
+
+All numeric fields in the source databases are stored as 255-character text strings — an Access quirk noted in the NYSED ReadMe. The cleaning pipeline explicitly coerces these to numeric and drops any row where the coercion fails. Reporting year labels follow the NYSED convention: "2024" means school year 2023–24.
+
+### The Peer-Grouping Framework
+
+NYSED's Need-to-Resource Capacity index is a measure of a district's ability to meet its students' needs with local resources. It is computed from the ratio of estimated poverty percentage to the Combined Wealth Ratio, both expressed in standard-score form. Districts are sorted into six categories:
+
+1. **New York City** (its own category)
+2. **Large City Districts** — Buffalo, Rochester, Syracuse, Yonkers
+3. **High Need Urban-Suburban** — above the 70th percentile of need, urban or suburban density
+4. **High Need Rural** — above the 70th percentile of need, rural density
+5. **Average Need** — between the 20th and 70th percentile
+6. **Low Need** — below the 20th percentile
+
+This dashboard uses N/RC as its primary framing so that district comparisons are made among peers. Comparing raw outcomes across N/RC categories without context is the single most common way this data gets misread in public conversation.
+
+### What This Data Cannot Tell You
+
+This is a descriptive dashboard. The correlations shown are not causal. A district with both high absenteeism and low proficiency is not necessarily a district where absenteeism *caused* the low proficiency — both may share upstream causes (poverty concentration, housing instability, teacher vacancies) that the data does not capture.
+
+The data also does not reflect individual student trajectories. A district-level proficiency rate of 45% tells you nothing about which students those are or whether the same students struggled year over year.
+:::

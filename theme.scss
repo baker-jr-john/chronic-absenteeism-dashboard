@@ -1,0 +1,49 @@
+/*-- scss:defaults --*/
+
+// Use one sans-serif stack across light and dark themes so text metrics
+// stay identical when toggling. Cosmo ships Source Sans Pro and Darkly
+// ships Lato, which causes layout shift on toggle.
+$font-family-sans-serif: system-ui, -apple-system, "Segoe UI", Roboto,
+  "Helvetica Neue", Arial, sans-serif !default;
+
+$headings-font-family: system-ui, -apple-system, "Segoe UI", Roboto,
+  "Helvetica Neue", Arial, sans-serif !default;
+
+// Cosmo uses font-weight 400 for headings, Darkly uses 500, which
+// shifts value-box text on toggle. Pin to a single weight.
+$headings-font-weight: 400 !default;
+
+// Cosmo sets $enable-rounded: false, which forces sharp corners at the
+// Bootstrap layer regardless of the $border-radius values. Re-enable it
+// so light and dark both render rounded corners.
+$enable-rounded: true !default;
+$border-radius: 0.375rem !default;
+$border-radius-sm: 0.25rem !default;
+$border-radius-lg: 0.5rem !default;
+
+/*-- scss:rules --*/
+
+// Keep the title text in the navbar but make it non-clickable. Also hide
+// the author slot entirely.
+.quarto-dashboard .navbar .navbar-brand-container a,
+.quarto-dashboard .navbar .navbar-brand {
+  pointer-events: none !important;
+  cursor: default !important;
+  text-decoration: none !important;
+  color: inherit !important;
+}
+.quarto-dashboard .navbar .navbar-author {
+  display: none !important;
+}
+
+// Value boxes have their own styling that ignores the Bootstrap variables
+// above, so force the font explicitly on every value-box element.
+.value-box,
+.value-box *,
+.value-box-value,
+.value-box-title,
+.value-box-area,
+.value-box-showcase {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif !important;
+}

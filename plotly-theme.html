@@ -1,0 +1,78 @@
+<script>
+  (function () {
+    function isDark() {
+      var alt = document.querySelector('link.quarto-color-scheme.quarto-color-alternate');
+      return !!(alt && alt.rel === 'stylesheet');
+    }
+
+    function baseOverrides(dark) {
+      return dark ? {
+        'paper_bgcolor': 'rgba(0,0,0,0)',
+        'plot_bgcolor': 'rgba(0,0,0,0)',
+        'font.color': '#dee2e6',
+        'legend.bgcolor': 'rgba(0,0,0,0)',
+        'xaxis.zerolinecolor': 'rgba(255,255,255,0.2)',
+        'yaxis.zerolinecolor': 'rgba(255,255,255,0.2)'
+      } : {
+        'paper_bgcolor': 'rgba(0,0,0,0)',
+        'plot_bgcolor': 'rgba(0,0,0,0)',
+        'font.color': '#212529',
+        'legend.bgcolor': 'rgba(0,0,0,0)',
+        'xaxis.zerolinecolor': 'rgba(0,0,0,0.2)',
+        'yaxis.zerolinecolor': 'rgba(0,0,0,0.2)'
+      };
+    }
+
+    function defaultGridOverrides(dark) {
+      return dark ? {
+        'xaxis.gridcolor': 'rgba(255,255,255,0.1)',
+        'yaxis.gridcolor': 'rgba(255,255,255,0.1)'
+      } : {
+        'xaxis.gridcolor': 'rgba(0,0,0,0.08)',
+        'yaxis.gridcolor': 'rgba(0,0,0,0.08)'
+      };
+    }
+
+    function trendsOverrides(dark) {
+      return dark ? {
+        'shapes[0].fillcolor': 'rgba(255,255,255,0.18)',
+        'annotations[0].font.color': '#aaa'
+      } : {
+        'shapes[0].fillcolor': 'rgba(0,0,0,0.12)',
+        'annotations[0].font.color': '#666'
+      };
+    }
+
+    function applyTheme() {
+      if (typeof Plotly === 'undefined') return;
+      var dark = isDark();
+      var base = baseOverrides(dark);
+      var grid = defaultGridOverrides(dark);
+      var trends = trendsOverrides(dark);
+      document.querySelectorAll('.js-plotly-plot').forEach(function (div) {
+        try {
+          var isTrends = !!(div._fullLayout && div._fullLayout.yaxis2);
+          var merged = Object.assign({}, base, isTrends ? trends : grid);
+          Plotly.relayout(div, merged);
+        } catch (e) {}
+      });
+    }
+
+    function init() {
+      applyTheme();
+      var alt = document.querySelector('link.quarto-color-scheme.quarto-color-alternate');
+      if (alt) {
+        new MutationObserver(applyTheme).observe(alt, {
+          attributes: true,
+          attributeFilter: ['rel']
+        });
+      }
+    }
+
+    if (document.readyState === 'complete') {
+      init();
+    } else {
+      window.addEventListener('load', init);
+    }
+  })();
+</script>

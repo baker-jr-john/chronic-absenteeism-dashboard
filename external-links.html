@@ -1,0 +1,13 @@
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var host = window.location.hostname;
+    document.querySelectorAll('a[href^="http://"], a[href^="https://"]').forEach(function (a) {
+      try {
+        if (new URL(a.href).hostname !== host) {
+          a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener noreferrer');
+        }
+      } catch (e) {}
+    });
+  });
+</script>
