@@ -4,9 +4,5 @@ data/raw/
 _freeze/
 .DS_Store
 
-# Rendered output
-/index.html
-/index_files/
-
 # Claude Code project instructions (local only)
 CLAUDE.md
